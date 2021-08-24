@@ -225,6 +225,10 @@ void calcGaussian_fixed_SM(const int *input, int *output, int cols, int rows, in
 
 int testGaussian(std::string in_file, std::string out_file, bool output, int tile_width, int iterations, int iterations_used, std::string file, bool shared_mem, int kw) {
     int max_color;
+    cudaEvent_t initstart, initstop;
+    cudaEventCreate(&initstart);
+    cudaEventCreate(&initstop);
+    cudaEventRecord(initstart);
 
     // Read image
     readPGM(in_file, rows, cols, max_color);
@@ -261,10 +265,24 @@ int testGaussian(std::string in_file, std::string out_file, bool output, int til
     cudaStreamCreate(&stream1);
     cudaStreamCreate(&stream2);
     cudaMemcpy(d_gs_image, gs_image, stencilmatrixsize, cudaMemcpyHostToDevice);
-    gpuErrchk(cudaPeekAtLastError());
-    gpuErrchk(cudaDeviceSynchronize());
+    //gpuErrchk(cudaPeekAtLastError());
+    //gpuErrchk(cudaDeviceSynchronize());
     int smem_size = (tile_width + kw) * (tile_width + kw) * sizeof(int) * 2;
-    cudaEvent_t start, stop;
+    cudaEventRecord(initstop);
+    cudaEventSynchronize(initstop);
+    float initmilliseconds = 0;
+    cudaEventElapsedTime(&initmilliseconds, initstart, initstop);
+    if (true) {
+        if (output) {
+            std::ofstream outputFile;
+            outputFile.open(file, std::ios_base::app);
+            outputFile << "" << initmilliseconds/1000 << ";";
+            printf("%.2f", initmilliseconds/1000);
+            outputFile.close();
+        }
+    }
+ 
+   cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     cudaEventRecord(start);

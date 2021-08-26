@@ -155,11 +155,11 @@ void calcGaussian(const int *input, int *output, int cols, int kw) {
     float sum = 0;
     for (int r = 0; r <= kw; ++r) {
         for (int c = 0; c <= kw; ++c) {
-            sum += input[(row + r) * cols + col + c] *
+            sum += input[(row + r) * (cols + kw) + col + c] *
                     EXP(-0.5 * (POW((r-mean)/sigma, 2.0) + POW((c-mean)/sigma,2.0))) / (2 * M_PI * sigma * sigma);
         }
     }
-    output[row*cols + col] = (int)sum/weight;
+    output[(row * (cols+kw) + (offset * (cols+kw))) + (col + offset)] = (int)sum/weight;
 }
 
 __global__
@@ -288,7 +288,6 @@ int testGaussian(std::string in_file, std::string out_file, bool output, int til
     cudaEventRecord(start);
     for (int run = 0; run < iterations; ++run) {
         // TODO make multiple GPUs
-        // TODO SM Variant
         if(!shared_mem){
             dim3 dimBlock(1024);
             dim3 dimGrid((rows*cols) / dimBlock.x);

@@ -27,7 +27,7 @@ endforeach (flag ${OpenMP_CXX_FLAGS})
 string(APPEND CMAKE_CUDA_FLAGS ${CMAKE_CUDA_HOST_FLAGS})
 string(APPEND CMAKE_CUDA_FLAGS ${CMAKE_CUDA_HOST_LINKER_FLAGS})
 
-set( CMAKE_CUDA_FLAGS_BENCHMARKPALMA "-O3 -arch=compute_75 --expt-extended-lambda -code=sm_75 -use_fast_math -w -restrict -Xptxas -O3 -Xcompiler -O3,-DNDEBUG,-march=broadwell,-DMPICH_IGNORE_CXX_SEEK,-std=c++14")
+set( CMAKE_CUDA_FLAGS_BENCHMARKPALMA "-O3 -arch=compute_35 --expt-extended-lambda -code=sm_35 -use_fast_math -w -restrict -Xptxas -O3 -Xcompiler -O3,-DNDEBUG,-march=broadwell,-DMPICH_IGNORE_CXX_SEEK,-std=c++14")
 
 # add muesli libs
 

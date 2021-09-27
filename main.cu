@@ -23,7 +23,7 @@ int* input_image_int;
 char* input_image_char;
 bool ascii = false;
 int DEFAULT_TILE_WIDTH = 16;
-bool DEBUG = true;
+bool DEBUG = false;
 int stencil_size = 2;
 #define gpuErrchk(ans)                                                         \
 { gpuAssert((ans), __FILE__, __LINE__); }
@@ -66,7 +66,7 @@ int readPGM(const std::string& filename, int& rows, int& cols, int& max_color)
     std::stringstream(inputLine) >> cols >> rows;
     getline(ifs, inputLine);
     std::stringstream(inputLine) >> max_color;
-    std::cout << "\nmax_color: " << max_color << "\t cols: " << cols << "\t rows: " << rows << std::endl;
+    //std::cout << "\nmax_color: " << max_color << "\t cols: " << cols << "\t rows: " << rows << std::endl;
 
     // Read image.
     if (ascii) {
@@ -105,7 +105,6 @@ int writePGM(const std::string& filename, int *out_image, int rows, int cols, in
             ofs << intensity;
         }
     }
-
     if (ofs.fail()) {
         std::cout << "Cannot write file " << filename << "!" << std::endl;
         return 1;
@@ -277,12 +276,12 @@ int testGaussian(std::string in_file, std::string out_file, bool output, int til
             std::ofstream outputFile;
             outputFile.open(file, std::ios_base::app);
             outputFile << "" << initmilliseconds/1000 << ";";
-            printf("%.2f", initmilliseconds/1000);
+            //printf("%.2f", initmilliseconds/1000);
             outputFile.close();
         }
     }
  
-   cudaEvent_t start, stop;
+    cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     cudaEventRecord(start);
@@ -322,7 +321,7 @@ int testGaussian(std::string in_file, std::string out_file, bool output, int til
             std::ofstream outputFile;
             outputFile.open(file, std::ios_base::app);
             outputFile << "" << milliseconds/1000 << ";";
-            printf("%.2f", milliseconds/1000);
+            //printf("%.2f", milliseconds/1000);
             outputFile.close();
         }
     }

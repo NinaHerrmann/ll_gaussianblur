@@ -355,10 +355,29 @@ int testGaussian(std::string in_file, std::string out_file, bool output, int til
         }
     }
     // TODO COPY BACK
+    cudaEvent_t copyback, copyback_stop;
+    cudaEventCreate(&copyback);
+    cudaEventCreate(&copyback_stop);
+    cudaEventRecord(copyback);
+
     cudaMemcpy(gs_image, d_gs_image_result, stencilmatrixsize, cudaMemcpyDeviceToHost);
 
     writePGM(out_file, gs_image, rows+kw, cols+kw, max_color);
-    return 0;
+cudaEventRecord(copyback_stop);
+    cudaEventSynchronize(copyback_stop);
+    float milliseconds3 = 0;
+    cudaEventElapsedTime(&milliseconds3, copyback, copyback_stop);
+    if (true) {
+        if (output) {
+            std::ofstream outputFile;
+            outputFile.open(file, std::ios_base::app);
+            outputFile << "" << milliseconds3/1000 << ";\n";
+            //printf("%.2f", milliseconds/1000);
+            outputFile.close();
+        }
+    }
+ 
+   return 0;
 }
 
 int init(int row, int col)
@@ -367,7 +386,7 @@ int init(int row, int col)
     else return input_image_char[row*cols+col];
 }
 int main(int argc, char **argv) {
-    std::cout << "\n\n************* Starting the Gaussian Blur *************\n ";
+    //std::cout << "\n\n************* Starting the Gaussian Blur *************\n ";
 
     int nGPUs = 1;
     int nRuns = 1;
@@ -380,7 +399,7 @@ int main(int argc, char **argv) {
     int kw = 2;
     std::string in_file, out_file, file, nextfile; //int kw = 10;
     file = "result_travel.csv";
-    if (argc >= 8) {
+    if (argc >= 9) {
         nGPUs = atoi(argv[1]);
         nRuns = atoi(argv[2]);
         cpu_fraction = atof(argv[3]);
@@ -393,11 +412,12 @@ int main(int argc, char **argv) {
             shared_mem = true;
         }
         kw = atoi(argv[7]);
+	//printf("%d", argv[7]);
 
     }
     std::string shared = shared_mem ? "SM" : "GM";
 
-    if (argc == 9) {
+    if (argc == 10) {
         in_file = argv[9];
         size_t pos = in_file.find(".");
         out_file = in_file;
@@ -405,7 +425,7 @@ int main(int argc, char **argv) {
         ss << "_" << nGPUs << "_" << iterations << "_" << shared <<  "_" << tile_width << "_" << kw << "_gaussian";
         out_file.insert(pos, ss.str());
     } else {
-        in_file = "travelsquaresquare.pgm";
+        in_file = "lena.pgm";
         std::stringstream oo;
         oo << in_file << "_" << nGPUs << "_" << iterations << "_" << shared <<  "_" << tile_width << "_" << kw << "_gaussian.pgm";
         out_file = oo.str();
@@ -424,7 +444,7 @@ int main(int argc, char **argv) {
         std::ofstream outputFile;
         outputFile.open(nextfile, std::ios_base::app);
         outputFile << "" + std::to_string(nGPUs) + ";" + std::to_string(tile_width) +";" + std::to_string(iterations) + ";" +
-        std::to_string(iterations_used) + ";\n";
+        std::to_string(iterations_used) + ";" + std::to_string(kw) + ";\n";
         outputFile.close();
     }
     std::cout << "\n************* Finished the Gaussian Blur *************\n ";

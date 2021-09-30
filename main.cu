@@ -222,6 +222,35 @@ void calcGaussian_fixed_SM(const int *input, int *output, int cols, int rows, in
     output[(global_col + offset) + global_row * (cols+kw) + (offset * (cols+kw))] = (int)sum/weight;
 }
 
+__global__
+void calcGaussian_fixed_SM(const int *input, int *output, int cols, int rows, int kw, int tile_width) {
+
+    int global_col = blockIdx.y * blockDim.y + threadIdx.y;
+    int global_row = blockIdx.x * blockDim.x + threadIdx.x;
+    int local_col = threadIdx.y;
+    int local_row = threadIdx.x;
+    int offset = kw/2;
+    float weight = 1.0f;
+    float sigma = 1;
+    int new_tile_width =  tile_width + kw;
+    float mean = (float)kw/2;
+    __shared__ int data[1764];
+    for (int r = 0; r <= kw; ++r) {
+        for (int c = 0; c <= kw; ++c) {
+            data[(local_row + r) * new_tile_width + (local_col + c)] = input[((global_row + r) * (cols+kw)) + (global_col + c)];
+        }
+    }
+    __syncthreads();
+    //printsm(global_row, global_col, new_tile_width, data);
+    float sum = 0;
+    for (int r = 0; r <= kw; ++r) {
+        for (int c = 0; c <= kw; ++c) {
+            sum += data[(local_row + r) * new_tile_width + (local_col + c)] *
+                    EXP(-0.5 * (POW((r-mean)/sigma, 2.0) + POW((c-mean)/sigma,2.0))) / (2 * M_PI * sigma * sigma);
+        }
+    }
+    output[(global_col + offset) + global_row * (cols+kw) + (offset * (cols+kw))] = (int)sum/weight;
+}
 int testGaussian(std::string in_file, std::string out_file, bool output, int tile_width, int iterations, int iterations_used, std::string file, bool shared_mem, int kw) {
     int max_color;
     cudaEvent_t initstart, initstop;

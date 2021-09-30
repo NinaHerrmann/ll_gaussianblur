@@ -4,6 +4,7 @@
  * This software is released under the MIT License.
  * https://opensource.org/licenses/MIT
  */
+#include <mpi.h>
 #include <algorithm>
 #include <string>
 #include <iostream>
@@ -222,42 +223,13 @@ void calcGaussian_fixed_SM(const int *input, int *output, int cols, int rows, in
     output[(global_col + offset) + global_row * (cols+kw) + (offset * (cols+kw))] = (int)sum/weight;
 }
 
-__global__
-void calcGaussian_fixed_SM(const int *input, int *output, int cols, int rows, int kw, int tile_width) {
-
-    int global_col = blockIdx.y * blockDim.y + threadIdx.y;
-    int global_row = blockIdx.x * blockDim.x + threadIdx.x;
-    int local_col = threadIdx.y;
-    int local_row = threadIdx.x;
-    int offset = kw/2;
-    float weight = 1.0f;
-    float sigma = 1;
-    int new_tile_width =  tile_width + kw;
-    float mean = (float)kw/2;
-    __shared__ int data[1764];
-    for (int r = 0; r <= kw; ++r) {
-        for (int c = 0; c <= kw; ++c) {
-            data[(local_row + r) * new_tile_width + (local_col + c)] = input[((global_row + r) * (cols+kw)) + (global_col + c)];
-        }
-    }
-    __syncthreads();
-    //printsm(global_row, global_col, new_tile_width, data);
-    float sum = 0;
-    for (int r = 0; r <= kw; ++r) {
-        for (int c = 0; c <= kw; ++c) {
-            sum += data[(local_row + r) * new_tile_width + (local_col + c)] *
-                    EXP(-0.5 * (POW((r-mean)/sigma, 2.0) + POW((c-mean)/sigma,2.0))) / (2 * M_PI * sigma * sigma);
-        }
-    }
-    output[(global_col + offset) + global_row * (cols+kw) + (offset * (cols+kw))] = (int)sum/weight;
-}
-int testGaussian(std::string in_file, std::string out_file, bool output, int tile_width, int iterations, int iterations_used, std::string file, bool shared_mem, int kw) {
+double testGaussian(std::string in_file, std::string out_file, bool output, int tile_width, int iterations, int iterations_used, std::string file, bool shared_mem, int kw) {
     int max_color;
-    cudaEvent_t initstart, initstop;
-    cudaEventCreate(&initstart);
-    cudaEventCreate(&initstop);
-    cudaEventRecord(initstart);
-
+    //cudaEvent_t initstart, initstop;
+    //cudaEventCreate(&initstart);
+    //cudaEventCreate(&initstop);
+    //cudaEventRecord(initstart);
+    double initstart = MPI_Wtime();
     // Read image
     readPGM(in_file, rows, cols, max_color);
     const unsigned int elements = (rows + kw) * (cols + kw);
@@ -296,15 +268,16 @@ int testGaussian(std::string in_file, std::string out_file, bool output, int til
     //gpuErrchk(cudaPeekAtLastError());
     //gpuErrchk(cudaDeviceSynchronize());
     int smem_size = (tile_width + kw) * (tile_width + kw) * sizeof(int) * 2;
-    cudaEventRecord(initstop);
-    cudaEventSynchronize(initstop);
-    float initmilliseconds = 0;
-    cudaEventElapsedTime(&initmilliseconds, initstart, initstop);
+    //cudaEventRecord(initstop);
+    //cudaEventSynchronize(initstop);
+    double initstop = MPI_Wtime();
+    //float initmilliseconds = 0;
+    //cudaEventElapsedTime(&initmilliseconds, initstart, initstop);
     if (true) {
         if (output) {
             std::ofstream outputFile;
             outputFile.open(file, std::ios_base::app);
-            outputFile << "" << initmilliseconds/1000 << ";";
+            outputFile << "" << (initstop-initstart) << ";";
             //printf("%.2f", initmilliseconds/1000);
             outputFile.close();
         }
@@ -362,7 +335,7 @@ int testGaussian(std::string in_file, std::string out_file, bool output, int til
 
     cudaMemcpy(gs_image, d_gs_image_result, stencilmatrixsize, cudaMemcpyDeviceToHost);
 
-    writePGM(out_file, gs_image, rows+kw, cols+kw, max_color);
+    //writePGM(out_file, gs_image, rows+kw, cols+kw, max_color);
 cudaEventRecord(copyback_stop);
     cudaEventSynchronize(copyback_stop);
     float milliseconds3 = 0;
@@ -377,7 +350,7 @@ cudaEventRecord(copyback_stop);
         }
     }
  
-   return 0;
+   return (milliseconds/1000);
 }
 
 int init(int row, int col)
@@ -398,7 +371,7 @@ int main(int argc, char **argv) {
     bool shared_mem = false;
     int kw = 2;
     std::string in_file, out_file, file, nextfile; //int kw = 10;
-    file = "result_travel.csv";
+    file = "2080_result_travel.csv";
     if (argc >= 9) {
         nGPUs = atoi(argv[1]);
         nRuns = atoi(argv[2]);
@@ -436,14 +409,15 @@ int main(int argc, char **argv) {
     nextfile = ss.str();
 
     int iterations_used = 0;
-    for (int r = 0; r < nRuns; ++r) {
-        testGaussian(in_file, out_file, output, tile_width, iterations, iterations_used, nextfile, shared_mem, kw);
+double time = 0.0; 
+   for (int r = 0; r < nRuns; ++r) {
+        time += testGaussian(in_file, out_file, output, tile_width, iterations, iterations_used, nextfile, shared_mem, kw);
     }
 
     if (output) {
         std::ofstream outputFile;
         outputFile.open(nextfile, std::ios_base::app);
-        outputFile << "" + std::to_string(nGPUs) + ";" + std::to_string(tile_width) +";" + std::to_string(iterations) + ";" +
+        outputFile << "" + std::to_string(nGPUs) + ";" + std::to_string(tile_width) +";"+ std::to_string(time/nRuns) +";" + std::to_string(iterations) + ";" +
         std::to_string(iterations_used) + ";" + std::to_string(kw) + ";\n";
         outputFile.close();
     }

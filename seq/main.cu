@@ -10,7 +10,7 @@
 #include <sstream>
 #include <fstream>
 //#include <cmath>
-#include <mpi.h>
+//#include <mpi.h>
 #define MAX_ITER 1000
 int rows, cols;
 int* input_image_int;

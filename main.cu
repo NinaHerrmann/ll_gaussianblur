@@ -277,7 +277,7 @@ double testGaussian(std::string in_file, std::string out_file, bool output, int 
         if (output) {
             std::ofstream outputFile;
             outputFile.open(file, std::ios_base::app);
-            outputFile << "" << (initstop-initstart) << ";";
+    //        outputFile << "" << (initstop-initstart) << ";";
             //printf("%.2f", initmilliseconds/1000);
             outputFile.close();
         }
@@ -287,7 +287,9 @@ double testGaussian(std::string in_file, std::string out_file, bool output, int 
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     cudaEventRecord(start);
-    for (int run = 0; run < iterations; ++run) {
+ //      double start = MPI_Wtime();
+
+     for (int run = 0; run < iterations; ++run) {
         // TODO make multiple GPUs
         if(!shared_mem){
             dim3 dimBlock(1024);
@@ -314,7 +316,8 @@ double testGaussian(std::string in_file, std::string out_file, bool output, int 
             gpuErrchk(cudaDeviceSynchronize());
         }
     }
-    cudaEventRecord(stop);
+   //     double stop = MPI_Wtime();
+cudaEventRecord(stop);
     cudaEventSynchronize(stop);
     float milliseconds = 0;
     cudaEventElapsedTime(&milliseconds, start, stop);
@@ -322,7 +325,7 @@ double testGaussian(std::string in_file, std::string out_file, bool output, int 
         if (output) {
             std::ofstream outputFile;
             outputFile.open(file, std::ios_base::app);
-            outputFile << "" << milliseconds/1000 << ";";
+  //          outputFile << "" << (stop-start) << ";";
             //printf("%.2f", milliseconds/1000);
             outputFile.close();
         }
@@ -344,7 +347,7 @@ cudaEventRecord(copyback_stop);
         if (output) {
             std::ofstream outputFile;
             outputFile.open(file, std::ios_base::app);
-            outputFile << "" << milliseconds3/1000 << ";\n";
+//            outputFile << "" << milliseconds3/1000 << ";\n";
             //printf("%.2f", milliseconds/1000);
             outputFile.close();
         }
@@ -371,7 +374,7 @@ int main(int argc, char **argv) {
     bool shared_mem = false;
     int kw = 2;
     std::string in_file, out_file, file, nextfile; //int kw = 10;
-    file = "2080_result_travel.csv";
+    file = "2080_result_lena";
     if (argc >= 9) {
         nGPUs = atoi(argv[1]);
         nRuns = atoi(argv[2]);
@@ -405,11 +408,11 @@ int main(int argc, char **argv) {
     }
     output = true;
     std::stringstream ss;
-    ss << file << "_" << iterations;
+    ss << file << "_" << iterations << ".csv";
     nextfile = ss.str();
 
     int iterations_used = 0;
-double time = 0.0; 
+   double time = 0.0; 
    for (int r = 0; r < nRuns; ++r) {
         time += testGaussian(in_file, out_file, output, tile_width, iterations, iterations_used, nextfile, shared_mem, kw);
     }

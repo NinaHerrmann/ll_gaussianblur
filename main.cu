@@ -25,6 +25,7 @@ bool ascii = false;
 int DEFAULT_TILE_WIDTH = 16;
 bool DEBUG = false;
 int stencil_size = 2;
+int block_mult = 1;
 #define gpuErrchk(ans)                                                         \
 { gpuAssert((ans), __FILE__, __LINE__); }
 
@@ -178,38 +179,87 @@ void calcGaussianSM(const int *input, int *output, int cols, int rows, int kw, i
     int global_row = blockIdx.x * blockDim.x + threadIdx.x;
     int local_col = threadIdx.y;
     int local_row = threadIdx.x;
-    int offset = kw/2;
+    const int offset = kw/2;
     int writeto = (global_col + offset) + global_row * (cols+kw) + (offset * (cols+kw));
-    float weight = 1.0f;
-    float sigma = 1;
-    int new_tile_width =  tile_width + kw;
-    int inside_elements = tile_width * tile_width;
-    int iterations =  ((new_tile_width * new_tile_width) / (inside_elements)) + 1;
-    float mean = (float)kw/2;
+    const float weight = 1.0f;
+    const float sigma = 1;
+    const int new_tile_width = tile_width + kw;
+    const int inside_elements = tile_width * tile_width;
+    const int iterations = ((new_tile_width * new_tile_width) / (inside_elements)) + 1;
     extern __shared__ int data[];
-
     // Fills "sequentially"
     for (int r = 0; r <= iterations; ++r) {
         int local_index = (r * (inside_elements)) + (local_row) * tile_width + (local_col);
         int row = local_index / new_tile_width;
         int firstcol = global_col - local_col;
         int g_col = firstcol + ((local_index) % new_tile_width);
-        if ((((global_row-local_row) + row) * (cols+kw)) + g_col < cols * 4000){
-            data[local_index] = input[(((global_row-local_row) + row) * (cols+kw)) + g_col];
+        int readfrom = (((global_row-local_row) + row) * (cols+kw)) + g_col;
+        if (local_index <= new_tile_width * new_tile_width) {
+            data[local_index] = input[readfrom];
         }
     }
 
     __syncthreads();
     //printsm(global_row, global_col, new_tile_width, data);
-    double sum = 0;
-    double divisor = (2 * M_PI * sigma * sigma);
-    for (int r = 0; r <= kw; ++r) {
-        for (int c = 0; c <= kw; ++c) {
-           sum += data[(local_row + r) * new_tile_width + (local_col + c)] *
-                   EXP(-0.5 * (POW((r-mean)/sigma, 2.0) + POW((c-mean)/sigma,2.0))) / divisor;
+    //
+    double sum0 = 0;
+    const double divisor = (2 * M_PI * sigma * sigma);
+    for (int r = 0; r < kw; ++r) {
+        for (int c = 0; c < kw; ++c) {
+           sum0 += data[(local_row + r) * new_tile_width + (local_col + c)] *
+                   EXP(-0.5 * (POW((r-offset)/sigma, 2.0) + POW((c-offset)/sigma,2.0))) / divisor;
         }
     }
-    output[writeto] = (int)(sum/weight);
+    output[writeto] = (int)(sum0/weight);
+}
+__global__
+void calcGaussianSM_double(const int *input, int *output, int cols, int rows, int kw, int tile_width, int block_mult) {
+
+    int global_col = blockIdx.y * blockDim.y + threadIdx.y;
+    int global_row = (blockIdx.x * blockDim.x + threadIdx.x) +
+            (tile_width * ((blockIdx.x * blockDim.x + threadIdx.x) / tile_width));
+    int local_col = threadIdx.y;
+    int local_row = threadIdx.x;
+    const int offset = kw/2;
+    int writeto = (global_col + offset) + global_row * (cols+kw) + (offset * (cols+kw));
+    const float weight = 1.0f;
+    const float sigma = 1;
+    const int new_tile_width = tile_width + kw;
+    const int inside_elements = tile_width * tile_width;
+    const int newsize = new_tile_width * new_tile_width + (new_tile_width * (tile_width));
+    const int iterations = block_mult * ((new_tile_width * new_tile_width) / (inside_elements)) + 1;
+    extern __shared__ int data[];
+    // Fills "sequentially"
+    // load "double" the elements to SM
+
+    for (int r = 0; r <= iterations; ++r) {
+        int local_index = (r * (inside_elements)) + (local_row) * tile_width + (local_col);
+        int row = local_index / new_tile_width;
+        int firstcol = global_col - local_col;
+        int g_col = firstcol + ((local_index) % new_tile_width);
+        int readfrom = (((global_row-local_row) + row) * (cols+kw)) + g_col;
+        if (local_index <= newsize) {
+            data[local_index] = input[readfrom];
+        }
+    }
+    __syncthreads();
+    //printsm(global_row, global_col, new_tile_width, data);
+    //
+    double sum0 = 0;
+    double sum1 = 0;
+    const double divisor = (2 * M_PI * sigma * sigma);
+    for (int r = 0; r < kw; ++r) {
+        for (int c = 0; c < kw; ++c) {
+            //if ((local_row + r) * new_tile_width + (local_col + c) >= (new_tile_width * new_tile_width)){ printf("uupss\n");}
+            int local_read_index = (local_row + r) * new_tile_width + (local_col + c);
+            sum0 += data[local_read_index] *
+                    EXP(-0.5 * (POW((r-offset)/sigma, 2.0) + POW((c-offset)/sigma,2.0))) / divisor;
+            sum1 += data[local_read_index + (new_tile_width * (tile_width + offset))] *
+                    EXP(-0.5 * (POW((r-offset)/sigma, 2.0) + POW((c-offset)/sigma,2.0))) / divisor;
+        }
+    }
+    output[writeto] = (int)(sum0/weight);
+    output[writeto + ((tile_width) * (cols+kw))] = (int)(sum1/weight);
 }
 __global__
 void old_calcGaussianSM(const int *input, int *output, int cols, int rows, int kw, int tile_width) {
@@ -350,20 +400,13 @@ float testGaussian(std::string in_file, std::string out_file, bool output, int t
             calcGaussian<<<dimGrid, dimBlock, smem_size, stream1>>>(d_gs_image_result, d_gs_image, cols, kw);
 
         } else{
-            if (tile_width == 32) {
                 dim3 dimBlock(tile_width, tile_width);
-                dim3 dimGrid((rows + dimBlock.x - 1) / dimBlock.x,
+                dim3 dimGrid((rows + dimBlock.x - 1) / dimBlock.x / block_mult,
                              (cols + dimBlock.y - 1) / dimBlock.y);
-                calcGaussian_fixed_SM<<<dimGrid, dimBlock, smem_size, stream1>>>(d_gs_image, d_gs_image_result, cols, rows, kw, tile_width);
-                calcGaussian_fixed_SM<<<dimGrid, dimBlock, smem_size, stream1>>>(d_gs_image_result, d_gs_image, cols, rows, kw, tile_width);
-
-            } else {
-                dim3 dimBlock(tile_width, tile_width);
-                dim3 dimGrid((rows + dimBlock.x - 1) / dimBlock.x,
-                             (cols + dimBlock.y - 1) / dimBlock.y);
-                calcGaussianSM<<<dimGrid, dimBlock, smem_size, stream1>>>(d_gs_image, d_gs_image_result, cols, rows, kw, tile_width);
-                calcGaussianSM<<<dimGrid, dimBlock, smem_size, stream1>>>(d_gs_image_result, d_gs_image, cols, rows, kw, tile_width);
-            }
+                calcGaussianSM_double<<<dimGrid, dimBlock, smem_size, stream1>>>(d_gs_image, d_gs_image_result, cols,
+                                                                                 rows, kw, tile_width, block_mult);
+                calcGaussianSM_double<<<dimGrid, dimBlock, smem_size, stream1>>>(d_gs_image_result, d_gs_image, cols,
+                                                                                 rows, kw, tile_width, block_mult);
         }
         if (DEBUG) {
             gpuErrchk(cudaPeekAtLastError());
@@ -410,9 +453,10 @@ int main(int argc, char **argv) {
     bool output = false;
     bool shared_mem = false;
     int kw = 2;
+
     std::string in_file, out_file, file, nextfile; //int kw = 10;
     file = "result_travel.csv";
-    if (argc >= 8) {
+    if (argc >= 9) {
         nGPUs = atoi(argv[1]);
         nRuns = atoi(argv[2]);
         cpu_fraction = atof(argv[3]);
@@ -425,11 +469,13 @@ int main(int argc, char **argv) {
             shared_mem = true;
         }
         kw = atoi(argv[7]);
+        block_mult = atoi(argv[8]);
 
     }
+    printf("\t%d\n", block_mult);
     std::string shared = shared_mem ? "SM" : "GM";
 
-    if (argc == 9) {
+    if (argc == 10) {
         in_file = argv[9];
         size_t pos = in_file.find(".");
         out_file = in_file;
@@ -439,7 +485,7 @@ int main(int argc, char **argv) {
     } else {
         in_file = "ungaro4k.pgm";
         std::stringstream oo;
-        oo << in_file << "_" << nGPUs << "_" << iterations << "_" << shared <<  "_" << tile_width << "_" << kw << "_gaussian.pgm";
+        oo << in_file << "_" << block_mult << "_" << nGPUs << "_" << iterations << "_" << shared <<  "_" << tile_width << "_" << kw << "_gaussian.pgm";
         out_file = oo.str();
     }
     output = true;
@@ -456,7 +502,8 @@ int main(int argc, char **argv) {
     if (output) {
         std::ofstream outputFile;
         outputFile.open(nextfile, std::ios_base::app);
-        outputFile << "" + std::to_string(nGPUs) + ";" + std::to_string(tile_width) + ";" + std::to_string(iterations) + ";" +
+        outputFile << "" + std::to_string(nGPUs) + ";"  + std::to_string(block_mult) + ";"
+        + std::to_string(tile_width) + ";" + std::to_string(iterations) + ";" +
         std::to_string(iterations_used) + ";" + std::to_string(overalltime/nRuns) + ";\n";
         outputFile.close();
     }

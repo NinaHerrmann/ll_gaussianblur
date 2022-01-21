@@ -5,8 +5,8 @@ nvcc main.cu -I include/ -I/usr/lib/x86_64-linux-gnu/openmpi/include/ -L/usr/lib
 for gpu_n in 1; do
     for cpu_p in 0.00; do
 	for iterations in 1; do
-	    for kw in 10; do
-		for block_mult in 125 250; do
+	    for kw in 10 15 20; do
+		for block_mult in 125; do
                     for tile_width in 32; do
 	                build/gaussian $gpu_n 1 $cpu_p $tile_width $iterations 1 $kw $block_mult
 	            done
@@ -16,3 +16,19 @@ for gpu_n in 1; do
         done
     done
 done
+
+for gpu_n in 1; do
+    for cpu_p in 0.00; do
+        for iterations in 1; do
+            for kw in 10 15 20; do
+                for block_mult in 250; do
+                    for tile_width in 16; do
+                        build/gaussian $gpu_n 1 $cpu_p $tile_width $iterations 1 $kw $block_mult
+                    done
+                done
+                #mpirun -np 1 build/gaussian $gpu_n 1 $cpu_p 12 $iterations 0 $kw 2
+            done
+        done
+    done
+done
+

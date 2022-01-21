@@ -98,7 +98,7 @@ int readPGM(const std::string& filename, int& rows, int& cols, int& max_color)
     std::stringstream(inputLine) >> cols >> rows;
     getline(ifs, inputLine);
     std::stringstream(inputLine) >> max_color;
-    std::cout << "\nmax_color: " << max_color << "\t cols: " << cols << "\t rows: " << rows << std::endl;
+   // std::cout << "\nmax_color: " << max_color << "\t cols: " << cols << "\t rows: " << rows << std::endl;
 
     // Read image.
     if (ascii) {
@@ -418,21 +418,61 @@ float testGaussian(std::string in_file, std::string out_file, bool output, int t
     float milliseconds = 0;
     cudaEventElapsedTime(&milliseconds, start, stop);
     if (true) {
-        if (output) {
             std::ofstream outputFile;
             outputFile.open(file, std::ios_base::app);
-            outputFile << "" << milliseconds/1000 << ";";
+            //outputFile << "" << milliseconds/1000 << ";";
             std::cout << "" << milliseconds/1000 << ";";
 
             outputFile.close();
+
+    }
+    gpuErrchk( cudaPeekAtLastError() );
+    gpuErrchk( cudaDeviceSynchronize() );
+    writePGM(out_file, gs_image, rows+kw, cols+kw, max_color);
+
+    cudaEventRecord(start);
+
+    for (int run = 0; run < iterations; ++run) {
+        // TODO make multiple GPUs
+        int threads = 128;
+        if(!shared_mem){
+            dim3 dimBlock(128);
+            dim3 dimGrid(((rows*cols)) / dimBlock.x);
+            calcGaussian<<<dimGrid, dimBlock, smem_size, stream1>>>(d_gs_image, d_gs_image_result, cols, kw);
+            calcGaussian<<<dimGrid, dimBlock, smem_size, stream1>>>(d_gs_image_result, d_gs_image, cols, kw);
+
+        } else{
+            dim3 dimBlock(tile_width, tile_width);
+            dim3 dimGrid((rows + dimBlock.x - 1) / dimBlock.x,
+                         (cols + dimBlock.y - 1) / dimBlock.y);
+            calcGaussianSM<<<dimGrid, dimBlock, smem_size, stream1>>>(d_gs_image, d_gs_image_result, cols,
+                                                                             rows, kw, tile_width);
+            calcGaussianSM<<<dimGrid, dimBlock, smem_size, stream1>>>(d_gs_image_result, d_gs_image, cols,
+                                                                             rows, kw, tile_width);
         }
+        if (DEBUG) {
+            gpuErrchk(cudaPeekAtLastError());
+            gpuErrchk(cudaDeviceSynchronize());
+        }
+    }
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    if (true) {
+            std::ofstream outputFile;
+            outputFile.open(file, std::ios_base::app);
+            //outputFile << "" << milliseconds/1000 << ";";
+            std::cout << "" << milliseconds/1000 << ";";
+
+            outputFile.close();
+
     }
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchk( cudaDeviceSynchronize() );
     // TODO COPY BACK
     cudaMemcpy(gs_image, d_gs_image_result, stencilmatrixsize, cudaMemcpyDeviceToHost);
 
-    writePGM(out_file, gs_image, rows+kw, cols+kw, max_color);
     return milliseconds;
 }
 
@@ -472,7 +512,7 @@ int main(int argc, char **argv) {
         block_mult = atoi(argv[8]);
 
     }
-    printf("\t%d\n", block_mult);
+    printf("%d;", block_mult);
     std::string shared = shared_mem ? "SM" : "GM";
 
     if (argc == 10) {

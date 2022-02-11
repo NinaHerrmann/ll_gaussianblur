@@ -276,10 +276,7 @@ float testGaussian(std::string in_file, std::string out_file, bool output, int t
         gpuErrchk(cudaDeviceSynchronize());
     }
     int smem_size = ((tile_width*block_mult) + kw) * (tile_width + kw) * sizeof(int);
-    cudaEventRecord(initstop);
-    cudaEventSynchronize(initstop);
     float initmilliseconds = 0;
-    cudaEventElapsedTime(&initmilliseconds, initstart, initstop);
     if (output) {
         std::ofstream outputFile;
         outputFile.open(file, std::ios_base::app);

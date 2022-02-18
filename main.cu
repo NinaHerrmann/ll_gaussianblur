@@ -23,7 +23,7 @@ int* input_image_int;
 char* input_image_char;
 bool ascii = false;
 int DEFAULT_TILE_WIDTH = 16;
-bool DEBUG = false;
+bool DEBUG = true;
 int stencil_size = 2;
 int block_mult = 1;
 #define gpuErrchk(ans)                                                         \
@@ -199,7 +199,7 @@ void calcGaussianSM_rep(const int *input, int *output, int cols, int rows, int k
         int firstcol = global_col -  threadIdx.y;
         int g_col = firstcol + ((local_index) % new_tile_width);
         int readfrom = (((g_row-threadIdx.x) + row) * (cols+kw)) + g_col;
-        if (local_index < newsize) {
+        if (local_index <= newsize) {
             data[local_index] = input[readfrom];
         }
     }
@@ -212,7 +212,7 @@ void calcGaussianSM_rep(const int *input, int *output, int cols, int rows, int k
         for (int r = 0; r < kw; ++r) {
             for (int c = 0; c < kw; ++c) {
                 int local_read_index = (local_row + r + (m*tile_width)) * new_tile_width + (local_col + c);
-                if (local_read_index < newsize) {
+                if (local_read_index <= newsize) {
                     sum += data[local_read_index] *
                             EXP(-0.5 * (POW((r-offset)/sigma, 2.0) + POW((c-offset)/sigma,2.0))) / divisor;
                 }
@@ -220,7 +220,7 @@ void calcGaussianSM_rep(const int *input, int *output, int cols, int rows, int k
         }
         int writeto = (global_col + offset) + global_row * (cols+kw) + (offset * (cols+kw));
 
-        if (writeto < (cols+kw) * (rows+kw)){
+        if (writeto <= ((cols+kw) * (rows+kw))){
             output[writeto + ((tile_width*m) * (cols+kw))] = (int)(sum/weight);
         }
     }
@@ -233,7 +233,7 @@ float testGaussian(std::string in_file, std::string out_file, bool output, int t
     //cudaEventCreate(&initstart);
     //cudaEventCreate(&initstop);
     //cudaEventRecord(initstart);
-    double initstart = MPI_Wtime();
+    //double initstart = MPI_Wtime();
     // Read image
     readPGM(in_file, rows, cols, max_color);
     int elements = (rows + kw) * (cols + kw);
@@ -269,12 +269,14 @@ float testGaussian(std::string in_file, std::string out_file, bool output, int t
     cudaStreamCreate(&stream1);
     cudaStreamCreate(&stream2);
     cudaMemcpy(d_gs_image, gs_image, stencilmatrixsize, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_gs_image_result, gs_image, stencilmatrixsize, cudaMemcpyHostToDevice);
 
     if (DEBUG) {
         gpuErrchk(cudaPeekAtLastError());
         gpuErrchk(cudaDeviceSynchronize());
     }
-    int smem_size = ((tile_width*block_mult) + kw) * (tile_width + kw) * sizeof(int);
+
+
     float initmilliseconds = 0;
     if (output) {
         std::ofstream outputFile;
@@ -287,8 +289,13 @@ float testGaussian(std::string in_file, std::string out_file, bool output, int t
         cudaEventCreate(&start);
         cudaEventCreate(&stop);
         cudaEventRecord(start);
-
+        if (DEBUG) {
+            gpuErrchk(cudaPeekAtLastError());
+            gpuErrchk(cudaDeviceSynchronize());
+        }
         for (int run = 0; run < iterations; ++run) {
+            int smem_size = ((tile_width + (2 * stencil_size)) * block_mult) *
+                    (tile_width + (2 * stencil_size)) * sizeof(int) * 2;
             // TODO make multiple GPUs
             int threads = 128;
             if(!shared_mem){
@@ -298,9 +305,16 @@ float testGaussian(std::string in_file, std::string out_file, bool output, int t
                 calcGaussian<<<dimGrid, dimBlock, smem_size, stream1>>>(d_gs_image_result, d_gs_image, cols, kw);
 
             } else{
+
+
+                    /*dim3 dimBlock(tile_width, tile_width);
+                    dim3 dimGrid((rows) / dimBlock.x / block_mult,
+                                 (cols + dimBlock.y - 1) / dimBlock.y);*/
                     dim3 dimBlock(tile_width, tile_width);
                     dim3 dimGrid((rows + dimBlock.x - 1) / dimBlock.x / block_mult,
                                  (cols + dimBlock.y - 1) / dimBlock.y);
+                    //smem_size = ((block_mult * tile_width) + kw) * (tile_width + kw) * sizeof(int);
+
                     calcGaussianSM_rep<<<dimGrid, dimBlock, smem_size, stream1>>>(d_gs_image, d_gs_image_result, cols,
                                                                                      rows, kw, tile_width, block_mult);
                     calcGaussianSM_rep<<<dimGrid, dimBlock, smem_size, stream1>>>(d_gs_image_result, d_gs_image, cols,
@@ -357,9 +371,10 @@ int main(int argc, char **argv) {
     bool output = false;
     bool shared_mem = false;
     int kw = 2;
+    int sm = 0;
     std::string in_file, out_file, file, nextfile; //int kw = 10;
     file = "result_travel.csv";
-    if (argc >= 6) {
+    if (argc >= 8) {
         nGPUs = atoi(argv[1]);
         nRuns = atoi(argv[2]);
         cpu_fraction = atof(argv[3]);
@@ -369,6 +384,8 @@ int main(int argc, char **argv) {
         tile_width = atoi(argv[4]);
         iterations = atoi(argv[5]);
         kw = atoi(argv[6]);
+        block_mult = atoi(argv[7]);
+        sm = atoi(argv[8]);
     }
     output = true;
     std::stringstream ss;
@@ -377,50 +394,53 @@ int main(int argc, char **argv) {
 
     int iterations_used = 0;
     float overalltime = 0.0;
-    for (int sm = 0; sm <=1; sm++) {
+//    for (int sm = 0; sm <=1; sm++) {
+//        shared_mem = false;
+    if (sm == 1) {
+        shared_mem = true;
+    }
+    if(sm == 2){
         shared_mem = false;
-        if (sm == 1) {
-            shared_mem = true;
+    }
+    in_file = "ungaro4k.pgm";
+    if (!shared_mem) {
+        std::stringstream oo;
+        oo << in_file << "GPU_" << nGPUs << "I_" << iterations << "_" << shared_mem <<  "TW_" << tile_width << "R_" << block_mult << "KW_" << kw <<"_gaussian.pgm";
+        out_file = oo.str();
+        for (int r = 0; r < nRuns; ++r) {
+            overalltime += testGaussian(in_file, out_file, output, tile_width, iterations, nextfile, shared_mem, kw);
         }
-            in_file = "ungaro4k.pgm";
-            if (!shared_mem) {
-                std::stringstream oo;
-                oo << in_file << "GPU_" << nGPUs << "I_" << iterations << "_" << shared_mem <<  "TW_" << tile_width << "R_" << block_mult << "KW_" << kw <<"_gaussian.pgm";
-                out_file = oo.str();
-                for (int r = 0; r < nRuns; ++r) {
-                    overalltime += testGaussian(in_file, out_file, output, tile_width, iterations, nextfile, shared_mem, kw);
-                }
-                if (output) {
-                    std::ofstream outputFile;
-                    outputFile.open(nextfile, std::ios_base::app);
-                    outputFile << "" + std::to_string(nGPUs) + ";"  + std::to_string(block_mult) + ";"
-                    + std::to_string(tile_width) + ";" + std::to_string(iterations) + ";" + std::to_string(overalltime/nRuns) + ";\n";
-                    outputFile.close();
-                }
-                std::cout << "" + std::to_string(nGPUs) + ";" + std::to_string(shared_mem) + ";" + std::to_string(tile_width) + ";" + std::to_string(block_mult) + ";" + std::to_string(kw) +";\n";
+        if (output) {
+            std::ofstream outputFile;
+            outputFile.open(nextfile, std::ios_base::app);
+            outputFile << "" + std::to_string(nGPUs) + ";"  + std::to_string(block_mult) + ";"
+            + std::to_string(tile_width) + ";" + std::to_string(iterations) + ";" + std::to_string(overalltime/nRuns) + ";\n";
+            outputFile.close();
+        }
+        std::cout << "" + std::to_string(nGPUs) + ";" + std::to_string(shared_mem) + ";" + std::to_string(tile_width) + ";" + std::to_string(block_mult) + ";" + std::to_string(kw) +";\n";
 
-            } else {
-                for (int block_mul = 1; block_mul <=25; block_mul++) {
-                    block_mult = block_mul;
-                    std::stringstream oo;
-                    oo << in_file << "GPU_" << nGPUs << "I_" << iterations << "_" << shared_mem <<  "TW_" << tile_width << "BM_" << block_mult << "KW_" << kw <<"_gaussian.pgm";
-                    out_file = oo.str();
-                    for (int r = 0; r < nRuns; ++r) {
-                        overalltime += testGaussian(in_file, out_file, output, tile_width, iterations, nextfile, shared_mem, kw);
-                    }
-                    if (output) {
-                        std::ofstream outputFile;
-                        outputFile.open(nextfile, std::ios_base::app);
-                        outputFile << "" + std::to_string(nGPUs) + ";"  + std::to_string(block_mult) + ";"
-                        + std::to_string(tile_width) + ";" + std::to_string(iterations) + ";" +
-                        std::to_string(overalltime/nRuns) + ";\n";
-                        outputFile.close();
-                    }
-                    std::cout << "" + std::to_string(nGPUs) + ";" + std::to_string(shared_mem) + ";" + std::to_string(tile_width) + ";" + std::to_string(block_mult) + ";" + std::to_string(kw) +";\n";
+    } else {
+        //for (int block_mul = 1; block_mul <=8; block_mul++) {
 
-                }
-            }
-            //std::cout << "\n************* Finished the Gaussian Blur *************\n ";
+        std::stringstream oo;
+        oo << in_file << "GPU_" << nGPUs << "I_" << iterations << "_" << shared_mem <<  "TW_" << tile_width << "BM_" << block_mult << "KW_" << kw <<"_gaussian.pgm";
+        out_file = oo.str();
+        for (int r = 0; r < nRuns; ++r) {
+            overalltime += testGaussian(in_file, out_file, output, tile_width, iterations, nextfile, shared_mem, kw);
+        }
+        if (output) {
+            std::ofstream outputFile;
+            outputFile.open(nextfile, std::ios_base::app);
+            outputFile << "" + std::to_string(nGPUs) + ";"  + std::to_string(block_mult) + ";"
+            + std::to_string(tile_width) + ";" + std::to_string(iterations) + ";" +
+            std::to_string(overalltime/nRuns) + ";\n";
+            outputFile.close();
+        }
+        std::cout << "" + std::to_string(nGPUs) + ";" + std::to_string(shared_mem) + ";" + std::to_string(tile_width) + ";" + std::to_string(block_mult) + ";" + std::to_string(kw) +";\n";
+
+        //}
+ //   }
+    //std::cout << "\n************* Finished the Gaussian Blur *************\n ";
     }
     return 0;
 }

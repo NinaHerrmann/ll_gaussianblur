@@ -23,7 +23,7 @@ int* input_image_int;
 char* input_image_char;
 bool ascii = false;
 int DEFAULT_TILE_WIDTH = 16;
-bool DEBUG = true;
+bool DEBUG = false;
 int stencil_size = 2;
 int block_mult = 1;
 #define gpuErrchk(ans)                                                         \
@@ -177,7 +177,6 @@ void calcGaussianSM_rep(const int *input, int *output, int cols, int rows, int k
 
     int global_col = blockIdx.y * blockDim.y + threadIdx.y;
     int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int global_row = (block_mult*tile_width * (x / tile_width)) + (threadIdx.x%tile_width);
     int g_row = (block_mult*tile_width * (x / tile_width)) + (threadIdx.x%tile_width);
 
 
@@ -218,7 +217,7 @@ void calcGaussianSM_rep(const int *input, int *output, int cols, int rows, int k
                 }
             }
         }
-        int writeto = (global_col + offset) + global_row * (cols+kw) + (offset * (cols+kw));
+        int writeto = (global_col + offset) + g_row * (cols+kw) + (offset * (cols+kw));
 
         if (writeto <= ((cols+kw) * (rows+kw))){
             output[writeto + ((tile_width*m) * (cols+kw))] = (int)(sum/weight);
@@ -317,6 +316,10 @@ float testGaussian(std::string in_file, std::string out_file, bool output, int t
 
                     calcGaussianSM_rep<<<dimGrid, dimBlock, smem_size, stream1>>>(d_gs_image, d_gs_image_result, cols,
                                                                                      rows, kw, tile_width, block_mult);
+                    if (DEBUG) {
+                        gpuErrchk(cudaPeekAtLastError());
+                        gpuErrchk(cudaDeviceSynchronize());
+                    }
                     calcGaussianSM_rep<<<dimGrid, dimBlock, smem_size, stream1>>>(d_gs_image_result, d_gs_image, cols,
                                                                                      rows, kw, tile_width, block_mult);
             }
